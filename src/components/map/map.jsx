@@ -18,7 +18,9 @@ const Map = () => {
   const position = [36.966428, -95.844032];
 
   useEffect(() => {
-    fetch("https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0/query?where=STATEABBRV='CA'&outFields=*&f=geojson")
+    fetch(
+      "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0/query?where=STATEABBRV='CA'&outFields=*&f=geojson"
+    )
       .then((res) => res.json())
       .then((data) => {
         console.log("County Features:", data.features.length);
@@ -28,7 +30,9 @@ const Map = () => {
   }, []);
 
   useEffect(() => {
-    fetch("https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/USA_Wildfires_v1/FeatureServer/0/query?where=POOState='US-CA'&outFields=IncidentName,POOState,FireCause&f=geojson")
+    fetch(
+      "https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/USA_Wildfires_v1/FeatureServer/0/query?where=POOState='US-CA'&outFields=IncidentName,POOState,FireCause&f=geojson"
+    )
       .then((res) => res.json())
       .then((data) => {
         console.log("Wildfire Features:", data.features.length);
@@ -82,8 +86,18 @@ const Map = () => {
               {geoData && (
                 <GeoJSON
                   data={geoData}
+                  style={(feature) => ({
+                    fillColor: "#2b8cbe",
+                    color: "white",
+                    weight: 1,
+                    fillOpacity: 0.25
+                  })}
                   onEachFeature={(feature, layer) => {
                     const props = feature.properties;
+
+                    layer.on("add", () => {
+                      layer.bringToBack();
+                    });
 
                     layer.bindPopup(`
                       County: ${props.COUNTY || "N/A"}<br/>
