@@ -1,145 +1,298 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from "react";
 import {
   MapContainer,
   TileLayer,
   LayersControl,
   LayerGroup,
-  GeoJSON
-} from 'react-leaflet';
-import L from 'leaflet';
+  GeoJSON,
+  useMapEvents
+} from "react-leaflet";
+import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
-const Map = () => {
+const COUNTY_URL =
+  "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0/query?where=STATEABBRV='CA'&outFields=*&f=geojson";
 
+const FIRE_URL =
+  "https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/USA_Wildfires_v1/FeatureServer/0/query?where=POOState='US-CA'&outFields=IncidentName,POOState,FireCause&f=geojson";
+
+const COUNTY_META_URL =
+  "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0?f=json";
+
+const FIRE_META_URL =
+  "https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/USA_Wildfires_v1/FeatureServer/0?f=json";
+
+// Map click handler
+const MapDrawingHandler = ({ onClick }) => {
+  useMapEvents({
+    click(e) {
+      onClick(e.latlng);
+    }
+  });
+  return null;
+};
+
+// Legend Component
+const Legend = () => {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: "20px",
+        right: "20px",
+        background: "white",
+        padding: "10px",
+        borderRadius: "5px",
+        boxShadow: "0 0 6px rgba(0,0,0,0.3)",
+        fontSize: "12px",
+        zIndex: 1000
+      }}
+    >
+      <h4>Legend</h4>
+      <div><span style={{ color: "blue" }}>■</span> Counties</div>
+      <div><span style={{ color: "red" }}>●</span> Wildfires</div>
+      <div><span style={{ color: "yellow" }}>●</span> Selected Fires</div>
+      <div><span style={{ color: "green" }}>■</span> Selection Box</div>
+    </div>
+  );
+};
+
+const Map = () => {
   const [geoData, setGeoData] = useState(null);
   const [fireData, setFireData] = useState(null);
+  const [countyMeta, setCountyMeta] = useState(null);
+  const [fireMeta, setFireMeta] = useState(null);
+
+  const [selectedFeature, setSelectedFeature] = useState(null);
+
+  const [drawing, setDrawing] = useState(false);
+  const [startPoint, setStartPoint] = useState(null);
+  const [bounds, setBounds] = useState(null);
+  const [selectedFires, setSelectedFires] = useState([]);
 
   const mapRef = useRef();
-  const position = [36.966428, -95.844032];
+  const position = [36.5, -119.5];
 
   useEffect(() => {
-    fetch(
-      "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0/query?where=STATEABBRV='CA'&outFields=*&f=geojson"
-    )
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("County Features:", data.features.length);
-        setGeoData(data);
-      })
-      .catch((err) => console.error("Failed to Load County Data", err));
+    fetch(COUNTY_URL).then(r => r.json()).then(setGeoData);
+    fetch(FIRE_URL).then(r => r.json()).then(setFireData);
+    fetch(COUNTY_META_URL).then(r => r.json()).then(setCountyMeta);
+    fetch(FIRE_META_URL).then(r => r.json()).then(setFireMeta);
   }, []);
 
-  useEffect(() => {
-    fetch(
-      "https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/USA_Wildfires_v1/FeatureServer/0/query?where=POOState='US-CA'&outFields=IncidentName,POOState,FireCause&f=geojson"
-    )
-      .then((res) => res.json())
-      .then((data) => {
-        console.log("Wildfire Features:", data.features.length);
-        setFireData(data);
-      })
-      .catch((err) => console.error("Failed to Load Fire Data", err));
-  }, []);
+  const handleMapClick = (latlng) => {
+    if (!drawing) {
+      setStartPoint(latlng);
+      setDrawing(true);
+    } else {
+      const newBounds = L.latLngBounds(startPoint, latlng);
+      setBounds(newBounds);
+      setDrawing(false);
+
+      if (!fireData) return;
+
+      const selected = fireData.features.filter(f => {
+        const [lon, lat] = f.geometry.coordinates;
+        return newBounds.contains([lat, lon]);
+      });
+
+      setSelectedFires(selected);
+    }
+  };
+
+  const clearSelection = () => {
+    setBounds(null);
+    setSelectedFires([]);
+    setDrawing(false);
+    setStartPoint(null);
+  };
+
+  const exportCSV = () => {
+    const rows = selectedFires.map(f => f.properties);
+    if (!rows.length) return;
+
+    const headers = Object.keys(rows[0]);
+    const csv =
+      headers.join(",") +
+      "\n" +
+      rows.map(r => headers.map(h => r[h]).join(",")).join("\n");
+
+    const blob = new Blob([csv], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "selected_fires.csv";
+    a.click();
+  };
+
+  const downloadJSON = (data, name) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json"
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+  };
 
   return (
-    <div style={{ height: "800px" }}>
-      <h4>AVN Exercise</h4>
+    <div style={{ display: "flex", position: "relative" }}>
+      <div style={{ width: "350px", padding: "10px", background: "#f4f4f4" }}>
+        <h3>Feature Info</h3>
 
-      <MapContainer
-        center={position}
-        zoom={5}
-        scrollWheelZoom={true}
-        ref={mapRef}
-        style={{ height: "100%", width: "100%" }}
-      >
-        <LayersControl position="topright">
+        {selectedFeature ? (
+          <div>
+            {"COUNTY" in selectedFeature ? (
+              <>
+                <p><b>OBJECTID:</b> {selectedFeature.OBJECTID ?? "N/A"}</p>
+                <p><b>County:</b> {selectedFeature.COUNTY ?? "N/A"}</p>
+                <p><b>Risk Rating:</b> {selectedFeature.RISK_RATNG ?? "N/A"}</p>
+              </>
+            ) : (
+              <>
+                <p><b>Incident:</b> {selectedFeature.IncidentName ?? "N/A"}</p>
+                <p><b>State:</b> {selectedFeature.POOState ?? "N/A"}</p>
+                <p><b>Cause:</b> {selectedFeature.FireCause ?? "N/A"}</p>
+              </>
+            )}
+          </div>
+        ) : (
+          <p>Click a feature</p>
+        )}
 
-          <LayersControl.BaseLayer checked name="OpenStreetMap">
-            <TileLayer
-              attribution='&copy; OpenStreetMap contributors'
-              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-            />
-          </LayersControl.BaseLayer>
+        <h3>Metadata</h3>
 
-          <LayersControl.BaseLayer name="Esri Satellite">
-            <LayerGroup>
-              <TileLayer
-                attribution='Tiles &copy; Esri'
-                url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
-              />
-              <TileLayer
-                attribution='Labels &copy; Esri'
-                url="https://services.arcgisonline.com/arcgis/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}"
-              />
-            </LayerGroup>
-          </LayersControl.BaseLayer>
+        {countyMeta && (
+          <>
+            <p><b>Counties:</b> {countyMeta.description || "N/A"}</p>
+            <button onClick={() => downloadJSON(countyMeta, "county_meta.json")}>
+              Download Counties Metadata
+            </button>
+          </>
+        )}
 
-          <LayersControl.BaseLayer name="CartoDB Dark">
-            <TileLayer
-              attribution='&copy; CARTO'
-              url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
-            />
-          </LayersControl.BaseLayer>
+        {fireMeta && (
+          <>
+            <p><b>Wildfires:</b> {fireMeta.description || "N/A"}</p>
+            <button onClick={() => downloadJSON(fireMeta, "fire_meta.json")}>
+              Download Fire Metadata
+            </button>
+          </>
+        )}
 
-          <LayersControl.Overlay checked name="CA Counties">
-            <LayerGroup>
-              {geoData && (
-                <GeoJSON
-                  data={geoData}
-                  style={(feature) => ({
-                    fillColor: "#2b8cbe",
-                    color: "white",
-                    weight: 1,
-                    fillOpacity: 0.25
-                  })}
-                  onEachFeature={(feature, layer) => {
-                    const props = feature.properties;
+        <h3>Spatial Query (Square)</h3>
+        <p>Click once to start, click again to finish</p>
+        <p>Selected Fires: {selectedFires.length}</p>
 
-                    layer.on("add", () => {
-                      layer.bringToBack();
-                    });
+        <button onClick={exportCSV}>Export CSV</button>
+        <br /><br />
+        <button onClick={clearSelection}>Clear Selection</button>
+      </div>
 
-                    layer.bindPopup(`
-                      County: ${props.COUNTY || "N/A"}<br/>
-                      Risk Score: ${props.RISK_SCORE ?? "N/A"}<br/>
-                      OBJECTID: ${props.OBJECTID ?? "N/A"}
-                    `);
-                  }}
-                />
-              )}
-            </LayerGroup>
-          </LayersControl.Overlay>
+      <div style={{ height: "800px", width: "100%", position: "relative" }}>
+        <MapContainer center={position} zoom={6} ref={mapRef} style={{ height: "100%" }}>
+          
+          <MapDrawingHandler onClick={handleMapClick} />
 
-          <LayersControl.Overlay checked name="Wildfires">
-            <LayerGroup>
-              {fireData && (
-                <GeoJSON
-                  data={fireData}
-                  pointToLayer={(feature, latlng) =>
-                    L.circleMarker(latlng, {
-                      radius: 6,
-                      fillColor: "red",
-                      color: "#800000",
-                      weight: 1,
-                      fillOpacity: 0.9
-                    })
-                  }
-                  onEachFeature={(feature, layer) => {
-                    const props = feature.properties;
+          <LayersControl position="topright">
 
-                    layer.bindPopup(`
-                      Incident: ${props.IncidentName || "N/A"}<br/>
-                      State: ${props.POOState || "N/A"}<br/>
-                      Cause: ${props.FireCause || "N/A"}
-                    `);
-                  }}
-                />
-              )}
-            </LayerGroup>
-          </LayersControl.Overlay>
+            <LayersControl.BaseLayer checked name="OpenStreetMap">
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            </LayersControl.BaseLayer>
 
-        </LayersControl>
-      </MapContainer>
+            <LayersControl.BaseLayer name="Satellite">
+              <TileLayer url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}" />
+            </LayersControl.BaseLayer>
+
+            <LayersControl.BaseLayer name="Dark">
+              <TileLayer url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png" />
+            </LayersControl.BaseLayer>
+
+            <LayersControl.Overlay checked name="Counties">
+              <LayerGroup>
+                {geoData && (
+                  <GeoJSON
+                    data={geoData}
+                    style={{ color: "blue", weight: 1, fillOpacity: 0.2 }}
+                    onEachFeature={(f, layer) => {
+                      layer.on("add", () => layer.bringToBack());
+                      layer.on("click", () => setSelectedFeature(f.properties));
+                    }}
+                  />
+                )}
+              </LayerGroup>
+            </LayersControl.Overlay>
+
+            <LayersControl.Overlay checked name="Fires">
+              <LayerGroup>
+                {fireData && (
+                  <GeoJSON
+                    data={fireData}
+                    pointToLayer={(f, latlng) =>
+                      L.circleMarker(latlng, {
+                        radius: 6,
+                        fillColor: "red",
+                        fillOpacity: 0.9,
+                        color: "black"
+                      })
+                    }
+                    onEachFeature={(f, layer) => {
+                      layer.on("add", () => layer.bringToFront());
+                      layer.on("click", () => setSelectedFeature(f.properties));
+                    }}
+                  />
+                )}
+              </LayerGroup>
+            </LayersControl.Overlay>
+
+            <LayersControl.Overlay checked name="Selection Box">
+              <LayerGroup>
+                {bounds && (
+                  <GeoJSON
+                    data={{
+                      type: "Feature",
+                      geometry: {
+                        type: "Polygon",
+                        coordinates: [[
+                          [bounds.getWest(), bounds.getSouth()],
+                          [bounds.getEast(), bounds.getSouth()],
+                          [bounds.getEast(), bounds.getNorth()],
+                          [bounds.getWest(), bounds.getNorth()],
+                          [bounds.getWest(), bounds.getSouth()]
+                        ]]
+                      }
+                    }}
+                    style={{ color: "green", weight: 2, fillOpacity: 0.4 }}
+                  />
+                )}
+              </LayerGroup>
+            </LayersControl.Overlay>
+
+            <LayersControl.Overlay checked name="Selected Fires">
+              <LayerGroup>
+                {selectedFires.length > 0 && (
+                  <GeoJSON
+                    data={{
+                      type: "FeatureCollection",
+                      features: selectedFires
+                    }}
+                    pointToLayer={(f, latlng) =>
+                      L.circleMarker(latlng, {
+                        radius: 8,
+                        fillColor: "yellow",
+                        fillOpacity: 0.9,
+                        color: "black"
+                      })
+                    }
+                  />
+                )}
+              </LayerGroup>
+            </LayersControl.Overlay>
+
+          </LayersControl>
+        </MapContainer>
+
+        <Legend />
+      </div>
     </div>
   );
 };
