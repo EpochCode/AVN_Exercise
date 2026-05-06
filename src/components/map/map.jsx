@@ -9,6 +9,7 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
+import Searchbar from "../searchplace/searchbar";
 
 const COUNTY_URL =
   "https://services.arcgis.com/XG15cJAlne2vxtgt/arcgis/rest/services/National_Risk_Index_Counties/FeatureServer/0/query?where=STATEABBRV='CA'&outFields=*&f=geojson";
@@ -22,7 +23,19 @@ const COUNTY_META_URL =
 const FIRE_META_URL =
   "https://services9.arcgis.com/RHVPKKiFTONKtxq3/arcgis/rest/services/USA_Wildfires_v1/FeatureServer/0?f=json";
 
-// Map click handler
+const getRiskColor = (score) => {
+  if (score == null) return "#ccc";
+
+  return score > 80 ? "#800026" :
+         score > 60 ? "#BD0026" :
+         score > 40 ? "#E31A1C" :
+         score > 20 ? "#FC4E2A" :
+         score > 10 ? "#FD8D3C" :
+         score > 5  ? "#FEB24C" :
+         score > 0  ? "#FED976" :
+                      "#FFEDA0";
+};
+
 const MapDrawingHandler = ({ onClick }) => {
   useMapEvents({
     click(e) {
@@ -32,30 +45,35 @@ const MapDrawingHandler = ({ onClick }) => {
   return null;
 };
 
-// Legend Component
-const Legend = () => {
-  return (
-    <div
-      style={{
-        position: "absolute",
-        bottom: "20px",
-        right: "20px",
-        background: "white",
-        padding: "10px",
-        borderRadius: "5px",
-        boxShadow: "0 0 6px rgba(0,0,0,0.3)",
-        fontSize: "12px",
-        zIndex: 1000
-      }}
-    >
-      <h4>Legend</h4>
-      <div><span style={{ color: "blue" }}>■</span> Counties</div>
-      <div><span style={{ color: "red" }}>●</span> Wildfires</div>
-      <div><span style={{ color: "yellow" }}>●</span> Selected Fires</div>
-      <div><span style={{ color: "green" }}>■</span> Selection Box</div>
-    </div>
-  );
-};
+const Legend = () => (
+  <div
+    style={{
+      position: "absolute",
+      bottom: "20px",
+      right: "20px",
+      background: "white",
+      padding: "10px",
+      borderRadius: "5px",
+      boxShadow: "0 0 6px rgba(0,0,0,0.3)",
+      fontSize: "12px",
+      zIndex: 1000
+    }}
+  >
+    <h4>Risk Score</h4>
+    <div><span style={{ background: "#800026", padding: "0 8px" }}></span> 80+</div>
+    <div><span style={{ background: "#BD0026", padding: "0 8px" }}></span> 60–80</div>
+    <div><span style={{ background: "#E31A1C", padding: "0 8px" }}></span> 40–60</div>
+    <div><span style={{ background: "#FC4E2A", padding: "0 8px" }}></span> 20–40</div>
+    <div><span style={{ background: "#FD8D3C", padding: "0 8px" }}></span> 10–20</div>
+    <div><span style={{ background: "#FEB24C", padding: "0 8px" }}></span> 5–10</div>
+    <div><span style={{ background: "#FED976", padding: "0 8px" }}></span> 0–5</div>
+
+    <hr />
+    <div><span style={{ color: "red" }}>●</span> Wildfires</div>
+    <div><span style={{ color: "yellow" }}>●</span> Selected Fires</div>
+    <div><span style={{ color: "green" }}>■</span> Selection Box</div>
+  </div>
+);
 
 const Map = () => {
   const [geoData, setGeoData] = useState(null);
@@ -70,6 +88,8 @@ const Map = () => {
   const [bounds, setBounds] = useState(null);
   const [selectedFires, setSelectedFires] = useState([]);
 
+  const [spatialQueryEnabled, setSpatialQueryEnabled] = useState(false);
+
   const mapRef = useRef();
   const position = [36.5, -119.5];
 
@@ -80,7 +100,19 @@ const Map = () => {
     fetch(FIRE_META_URL).then(r => r.json()).then(setFireMeta);
   }, []);
 
+  const downloadJSON = (data, name) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json"
+    });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+  };
+
   const handleMapClick = (latlng) => {
+    if (!spatialQueryEnabled) return;
+
     if (!drawing) {
       setStartPoint(latlng);
       setDrawing(true);
@@ -124,16 +156,6 @@ const Map = () => {
     a.click();
   };
 
-  const downloadJSON = (data, name) => {
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: "application/json"
-    });
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(blob);
-    a.download = name;
-    a.click();
-  };
-
   return (
     <div style={{ display: "flex", position: "relative" }}>
       <div style={{ width: "350px", padding: "10px", background: "#f4f4f4" }}>
@@ -143,15 +165,14 @@ const Map = () => {
           <div>
             {"COUNTY" in selectedFeature ? (
               <>
-                <p><b>OBJECTID:</b> {selectedFeature.OBJECTID ?? "N/A"}</p>
-                <p><b>County:</b> {selectedFeature.COUNTY ?? "N/A"}</p>
-                <p><b>Risk Rating:</b> {selectedFeature.RISK_RATNG ?? "N/A"}</p>
+                <p><b>County:</b> {selectedFeature.COUNTY}</p>
+                <p><b>Risk Score:</b> {selectedFeature.RISK_SCORE}</p>
+                <p><b>Risk Rating:</b> {selectedFeature.RISK_RATNG}</p>
               </>
             ) : (
               <>
-                <p><b>Incident:</b> {selectedFeature.IncidentName ?? "N/A"}</p>
-                <p><b>State:</b> {selectedFeature.POOState ?? "N/A"}</p>
-                <p><b>Cause:</b> {selectedFeature.FireCause ?? "N/A"}</p>
+                <p><b>Incident:</b> {selectedFeature.IncidentName}</p>
+                <p><b>Cause:</b> {selectedFeature.FireCause}</p>
               </>
             )}
           </div>
@@ -179,19 +200,38 @@ const Map = () => {
           </>
         )}
 
-        <h3>Spatial Query (Square)</h3>
-        <p>Click once to start, click again to finish</p>
-        <p>Selected Fires: {selectedFires.length}</p>
+        <h3>Spatial Query</h3>
 
-        <button onClick={exportCSV}>Export CSV</button>
-        <br /><br />
-        <button onClick={clearSelection}>Clear Selection</button>
+        <label>
+          <input
+            type="checkbox"
+            checked={spatialQueryEnabled}
+            onChange={(e) => {
+              setSpatialQueryEnabled(e.target.checked);
+              clearSelection();
+            }}
+          />
+          Enable Spatial Query
+        </label>
+
+        {spatialQueryEnabled && (
+          <>
+            <p>Click twice to draw selection box</p>
+            <p>Selected Fires: {selectedFires.length}</p>
+
+            <button onClick={exportCSV}>Export CSV</button>
+            <br /><br />
+            <button onClick={clearSelection}>Clear Selection</button>
+          </>
+        )}
       </div>
 
       <div style={{ height: "800px", width: "100%", position: "relative" }}>
         <MapContainer center={position} zoom={6} ref={mapRef} style={{ height: "100%" }}>
           
-          <MapDrawingHandler onClick={handleMapClick} />
+          {spatialQueryEnabled && (
+            <MapDrawingHandler onClick={handleMapClick} />
+          )}
 
           <LayersControl position="topright">
 
@@ -212,10 +252,23 @@ const Map = () => {
                 {geoData && (
                   <GeoJSON
                     data={geoData}
-                    style={{ color: "blue", weight: 1, fillOpacity: 0.2 }}
+                    style={(feature) => ({
+                      color: "black",
+                      weight: 1,
+                      fillOpacity: 0.6,
+                      fillColor: getRiskColor(feature.properties.RISK_SCORE)
+                    })}
                     onEachFeature={(f, layer) => {
                       layer.on("add", () => layer.bringToBack());
                       layer.on("click", () => setSelectedFeature(f.properties));
+
+                      layer.on("mouseover", (e) => {
+                        e.target.setStyle({ weight: 2, fillOpacity: 0.8 });
+                      });
+
+                      layer.on("mouseout", (e) => {
+                        e.target.setStyle({ weight: 1, fillOpacity: 0.6 });
+                      });
                     }}
                   />
                 )}
@@ -236,7 +289,6 @@ const Map = () => {
                       })
                     }
                     onEachFeature={(f, layer) => {
-                      layer.on("add", () => layer.bringToFront());
                       layer.on("click", () => setSelectedFeature(f.properties));
                     }}
                   />
@@ -289,6 +341,8 @@ const Map = () => {
             </LayersControl.Overlay>
 
           </LayersControl>
+
+          <Searchbar />
         </MapContainer>
 
         <Legend />
